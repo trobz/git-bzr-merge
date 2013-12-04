@@ -96,9 +96,9 @@ and merge branches manually.
 
 ### git to bzr
 
-1. 2 cases:
-..1. create a git branch based on bzr target branch (use git-remote-bzr)
-..2. already exist, pull bzr sources
+1. 2 cases
+  1.  create a git branch based on bzr target branch (use git-remote-bzr)
+  2. already exist, pull bzr sources
 2. export the current filtered git branch to a tmp branch
 3. merge the tmp branch with the bzr branch
 4. push back on bzr
@@ -112,9 +112,9 @@ git bzr-merge push bzr-repository bzr-branch [-m 'merge message'] [--filter sour
 
 ### bzr to git
 
-1. 2 cases:
-..1. create a git branch based on bzr target branch (use git-remote-bzr)
-..2. already exist, pull bzr sources
+1. 2 cases
+  1. create a git branch based on bzr target branch (use git-remote-bzr)
+  2. already exist, pull bzr sources
 2. export the filtered bzr branch to a tmp branch
 3. merge the tmp branch with the current git branch
 4. remove the tmp branch
