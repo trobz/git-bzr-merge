@@ -1,6 +1,8 @@
 git bzr-remote
 ==============
 
+[![Build Status](https://travis-ci.org/trobz/git-bzr-merge.png?branch=master)](https://travis-ci.org/trobz/git-bzr-merge)
+
 Bi-directional git <-> bzr merging plugin for git.
 
 ## Feature
