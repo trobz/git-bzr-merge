@@ -107,7 +107,7 @@ $ bats tests
 
 - Created by Michel Meyer
 - Inspired by:
--- [git-bzr](https://github.com/termie/git-bzr-ng/blob/master/git-bzr)
--- [git-remote-bzr](https://github.com/felipec/git/blob/fc/master/git-remote-bzr.py)
+  - [git-bzr](https://github.com/termie/git-bzr-ng/blob/master/git-bzr)
+  - [git-remote-bzr](https://github.com/felipec/git/blob/fc/master/git-remote-bzr.py)
 - Thanks to Raphaël Valyi (from the openerp community) for his ideas and help
 
