@@ -7,7 +7,7 @@ sudo apt-get -ym install wget
 sudo apt-get -ym install git
 # remove bazaar to reinstall the latest version
 sudo apt-get -y remove bzr python-bzrlib 
-sudo apt-get -y autoremov
+sudo apt-get -y autoremove
 # install bazaar from latest package
 wget http://ftp.us.debian.org/debian/pool/main/b/bzr/python-bzrlib_2.6.0~bzr6526-1_amd64.deb
 wget http://ftp.us.debian.org/debian/pool/main/b/bzr/bzr_2.6.0~bzr6526-1_all.deb
