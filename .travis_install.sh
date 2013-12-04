@@ -15,6 +15,20 @@ sudo dpkg -i python-bzrlib_2.6.0~bzr6526-1_amd64.deb
 sudo dpkg -i bzr_2.6.0~bzr6526-1_all.deb
 sudo apt-get -f -y install
 
+echo ""
+echo "check bzrlib location..."
+sudo apt-get install locate
+sudo updatedb
+sudo locate --regex bzrlib*.py
+echo ""
+echo "check bzrlib..."
+python -c "import sys; print sys.path"
+python -c "import bzrlib"
+echo 'SUDO python import/path'
+sudo python -c "import sys; print sys.path"
+sudo python -c "import bzrlib"
+echo ""
+
 # install git-remote-bzr
 sudo wget https://raw.github.com/felipec/git/fc/master/git-remote-bzr.py -O /usr/local/bin/git-remote-bzr
 
