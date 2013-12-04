@@ -38,6 +38,55 @@ Copy to your ~/bin, or anywhere in your $PATH.
 
 Please check also the [dependencies section]([#dependencies).
 
+## Usage
+
+Note: only tested with local bzr repository for now
+
+**pull**
+
+```
+$ cd /path/to/git-repo
+$ git bzr-merge pull --remember --filter moduleA /path/to/bzr-repo bzr-branch
+then later...
+$ git bzr-merge pull
+```
+
+**push**
+
+```
+$ cd /path/to/git-repo
+$ git bzr-merge push --remember --filter moduleA /path/to/bzr-repo bzr-branch
+then later...
+$ git bzr-merge push
+```
+
+**help**
+
+```
+$ git bzr-merge pull --help
+usage: pull [-h] [--remember] [-m MESSAGE] [-r REMOTE_NAME] [-f FILTER]
+            [-t TMP_BRANCH]
+            repository branch
+
+Pull from a bzr branch into working git branch
+
+positional arguments:
+  repository            bzr repository path (lp, ssh, folder)
+  branch                bzr branch name
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --remember            remember parameters (saved by git remote)
+  -m MESSAGE, --message MESSAGE
+                        merge message
+  -r REMOTE_NAME, --remote-name REMOTE_NAME
+                        bzr remote name
+  -f FILTER, --filter FILTER
+                        source filter, support wildcard
+  -t TMP_BRANCH, --tmp-branch TMP_BRANCH
+                        temporary branch used for filtered merging
+```
+
 ## Details
 
 Steps described are for a filtered merge but it's optional and merge can be done directly from/to the bzr branch
