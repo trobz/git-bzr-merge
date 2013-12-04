@@ -24,5 +24,8 @@ cd bats
 sudo ./install.sh /usr/local
 cd ..
 
-# define bzr user
+# define bzr/git user
 bzr whoami "Travis <robot@travis-ci.org>"
+git config --global user.email "robot@travis-ci.org"
+git config --global user.name "Travis"
+
