@@ -1,0 +1,408 @@
+#!/usr/bin/env python
+#
+# https://github.com/trobz/git-bzr-merge
+# Copyright (c) 2013 Trobz
+# Author Michel Meyer
+#
+# Inspired by https://github.com/termie/git-bzr-ng/blob/master/git-bzr
+#
+# Copy to your ~/bin, or anywhere in your $PATH.
+#
+# This add-on require the installation of git-remote-bzr
+# see: https://github.com/felipec/git/blob/fc/master/git-remote-bzr.py
+#
+# see README.md for more details
+#
+
+import os
+import re
+import sys
+import subprocess
+import logging
+import argparse
+from argparse import Namespace
+
+import bzrlib
+if hasattr(bzrlib, "initialize"):
+    bzrlib.initialize()
+
+import bzrlib.plugin
+bzrlib.plugin.load_plugins()
+
+import bzrlib.generate_ids
+import bzrlib.transport
+import bzrlib.errors
+import bzrlib.ui
+import bzrlib.urlutils
+import bzrlib.branch
+
+
+log = logging.getLogger('bzr-remote')
+
+# useful methods (from git-bzr)
+
+def die(message, *args):
+    log.error(message, *args)
+    sys.exit(1)
+
+def run_command(cmd, error_ok=False, error_message=None, exit_code=False,
+                redirect_stdout=True, return_proc=False, stdout=None,
+                stdin=None):
+    # Useful for debugging:
+    log.debug('execute: "%s"',' '.join(cmd))
+    if redirect_stdout and stdout is None:
+        stdout = subprocess.PIPE
+
+    proc = subprocess.Popen(cmd, stdout=stdout, stdin=stdin)
+
+    if return_proc:
+        return proc
+
+    if stdout == subprocess.PIPE:
+        output = proc.communicate()[0]
+    else:
+        output = ''
+        proc.wait()
+
+    if exit_code:
+        return proc.returncode
+    if not error_ok and proc.returncode != 0:
+        die('Command "%s" failed.\n' % (' '.join(cmd)) +
+            (error_message or output))
+    return output
+
+def git(args, **kwargs):
+    cmd = ['git'] + args
+    return run_command(cmd, **kwargs)
+
+
+def bzr(args, **kwargs):
+    cmd = ['bzr'] + args
+    return run_command(cmd, **kwargs)
+
+def short_branch_name(branch):
+    """Convert a name like 'refs/heads/foo' to just 'foo'."""
+    return branch.replace('refs/heads/', '')
+
+
+def normalize_upstream(path):
+    """Fix paths if necessary.
+
+    Upstream will either be a launchpad url, a bzr url, or a path.
+    """
+    if not path:
+        return path
+    if ':' not in path:
+        return os.path.abspath(path)
+    return path
+
+
+
+def store_cfg(key, values):
+    for name, value in values.items():
+        if value:
+            set_cfg('%s.%s' % (key, name), value)
+
+def set_cfg(key, value):
+    git(['config', key, value])
+
+
+def get_cfg(key, default=None):
+    return  git(['config', '--get', key]).strip() if has_cfg(key) else default
+
+def clear_cfg(key):
+    git(['config', '--unset', key])
+
+
+def has_cfg(key):
+    return run_command(['git', 'config', '--get', key], error_ok=True, exit_code=True) == 0
+
+def branch_exists(branch):
+    branches = git(['branch', '-a'])
+    branches = branches.split('\n')
+    matcher = re.compile(r'\s%s$' % branch)
+    for x in branches:
+        if matcher.search(x):
+            return True
+    return False
+
+
+def bzr_branches(repo):
+    transport = repo.bzrdir.root_transport
+
+    for fn in transport.iter_files_recursive():
+        if not fn.endswith('.bzr/branch-format'):
+            continue
+
+        name = subdir = fn[:-len('/.bzr/branch-format')]
+        name = name if name != '' else 'master'
+        name = name.replace('/', '+')
+
+        try:
+            cur = transport.clone(subdir)
+            branch = bzrlib.branch.Branch.open_from_transport(cur)
+        except bzrlib.errors.NotBranchError:
+            continue
+        else:
+            yield name, branch.base
+
+def bzr_repo(uri):
+    origin = bzrlib.bzrdir.BzrDir.open(uri)
+    return origin.open_repository()
+
+
+# Common methods
+
+def git_export(branch, filter='*', tmp_branch='tmp_branch'):
+
+    cmd = [
+        """ git fast-export %s %s """ % (branch, filter),
+        """ sed "s|refs/heads/%s|refs/heads/%s|" """ % (branch, tmp_branch),
+        """ git fast-import """
+    ]
+    cmd = '|'.join(cmd)
+
+    log.debug('execute (shell): %s', cmd)
+    proc = subprocess.Popen(cmd, shell=True)
+    exit_code = proc.wait()
+
+    if exit_code != 0:
+        log.error('command failed with exitcode: %s', exit_code)
+
+def git_branch():
+    """
+    Get working git branch
+    """
+    git_branch = None
+    branches = git(['branch']).split('\n')
+    pattern = re.compile(r'^\*[ ]+(?P<branch>.*)$')
+    for branch in branches:
+        matches = pattern.match(branch)
+        if matches:
+            git_branch = matches.group('branch')
+    return git_branch, '.', '.'
+
+
+def git_remote(uri):
+    """
+    Check if the bzr remote is already defined
+    """
+    remotes = git(['remote', '-v']).split('\n')
+    pattern = re.compile(r'(?iu)^(?P<name>[^ ]+)[\t]+bzr::(?P<remote>[^ ]+)')
+    for remote in remotes:
+        log.debug('check remote: %s', remote)
+        matches = pattern.match(remote)
+        if matches and matches.group('remote') in uri:
+            return matches.groups()
+    return None, None
+
+def bzr_branch(uri, branch):
+    """
+    Step to validate the bzr repo and branch
+    """
+    try:
+        repo = bzr_repo(uri)
+        for name, branch_uri in bzr_branches(repo):
+            if name == branch:
+                return name, branch_uri
+    except Exception as e:
+        log.error(e)
+        raise
+    raise Exception('branch %s cannot be found on repository %s' %(branch, uri))
+
+
+def add_remote(uri, branch, remote_name):
+    """
+    add bzr remote
+    """
+    name, remote = git_remote(uri)
+
+    if name:
+        if name != remote_name:
+            raise Exception('remote already configured with an other name (%s)' % name)
+
+        cfg_branch = get_cfg('remote.%s.bzr-branches' % name)
+
+        logging.info('compare %s with %s', cfg_branch, branch)
+
+        if cfg_branch != branch:
+            raise Exception('remote "%s" already configured for an other branch (%s)' % (name, cfg_branch))
+
+        log.info('remote bzr already configured as "%s"', name)
+    else:
+        git(['remote', 'add', remote_name, 'bzr::%s' % uri])
+        set_cfg('remote.%s.bzr-branches' % remote_name, branch)
+        git(['remote', 'update', remote_name])
+
+    return remote_name
+
+def add_bzr_branch(uri, branch, remote_name):
+    add_remote(uri, branch, remote_name)
+
+    if not branch_exists(branch):
+        git(['checkout', '-b', branch, '%s/%s' % (remote_name, branch)])
+    else:
+        log.info('bzr branch "%s" already exist on git repo', branch)
+    # force pull on bzr branch
+    git(['checkout', branch])
+    git(['pull'])
+
+    return git_remote
+
+# Define CMD
+
+def cmd_pull(arg, git_branch, bzr_branch):
+    log.info('pull bzr branch "%s" into git branch "%s"', bzr_branch[0], git_branch[0])
+
+    add_bzr_branch(arg.repository, arg.branch, arg.remote_name)
+
+    if not arg.message:
+        message = "[merge] bzr branch '%s' into git branch '%s'" % (bzr_branch[0], git_branch[0])
+        if arg.filter:
+            message += " with filter: '%s'" % arg.filter
+    else:
+        message = arg.message
+
+    # use a tmp branch if a filter has to be used
+    if arg.filter:
+        git_export(arg.branch, arg.filter, arg.tmp_branch)
+        git(['checkout', git_branch[0]])
+        git(['merge', arg.tmp_branch, '-m', message])
+        git(['branch', '-D', arg.tmp_branch])
+
+    else:
+        git(['checkout', git_branch[0]])
+        git(['merge', arg.branch, '-m', message])
+
+
+
+
+def cmd_push(arg, git_branch, bzr_branch):
+    log.info('push git branch "%s" into bzr branch "%s"', git_branch[0], bzr_branch[0])
+    add_bzr_branch(arg.repository, arg.branch, arg.remote_name)
+
+    if not arg.message:
+        message = "[merge] git branch '%s' into bzr branch '%s'" % (git_branch[0], bzr_branch[0])
+        if arg.filter:
+            message += " with filter: '%s'" % arg.filter
+    else:
+        message = arg.message
+
+    # use a tmp branch if a filter has to be used
+    if arg.filter:
+        git(['checkout', git_branch[0]])
+        git_export(git_branch[0], arg.filter, arg.tmp_branch)
+        git(['checkout', arg.branch])
+        git(['merge', arg.tmp_branch, '-m', message])
+        git(['push'])
+        git(['checkout', git_branch[0]])
+        git(['branch', '-D', arg.tmp_branch])
+
+    else:
+        git(['checkout', arg.branch])
+        git(['merge', git_branch[0], '-m', message])
+        git(['push'])
+        git(['checkout', git_branch[0]])
+
+
+def cmd_info(arg):
+    print 'info'
+
+# Add CMD to git command
+
+
+def parse_arguments(name, desc):
+    parser = argparse.ArgumentParser(description=desc, prog=name)
+    parser.add_argument('repository', default=False, help='bzr repository path (lp, ssh, folder)')
+    parser.add_argument('branch', default=False, help='bzr branch name')
+    parser.add_argument('--remember', default=False, action='store_true', help='remember parameters (saved by git remote)')
+    parser.add_argument('-m', '--message', default=False, help='merge message')
+    parser.add_argument('-r', '--remote-name', default='bzr', help='bzr remote name')
+    parser.add_argument('-f', '--filter', default=False, help='source filter, support wildcard')
+    parser.add_argument('-t', '--tmp-branch', default='tmp_branch', help='temporary branch used for filtered merging')
+    return parser.parse_args()
+
+
+COMMANDS = [
+    ('pull', 'Pull from a bzr branch into working git branch', cmd_pull),
+    ('push', 'Push working git branch into a bzr branch', cmd_push),
+    ('info', 'Get info about current pull/push configuration', cmd_info),
+]
+
+def usage(name):
+    print ''
+    print 'usage: git bzr-merge <command> repository branch [options]'
+    print ''
+    print 'commands:'
+    for name, desc, _ in COMMANDS:
+        print '  %-10s %s' % (name, desc)
+    sys.exit(1)
+
+
+def get_remote_name(args):
+    remote_name = 'bzr'
+    for index, arg in enumerate(args):
+        if arg == '-r' or arg == '--remote-name' and len(args) > index+1:
+            remote_name = args[index+1]
+    return remote_name
+
+
+def config_arguments(remote_name):
+    args = {
+        'repository': get_cfg('remote.%s.%s' % (remote_name, 'bzr-repo')),
+        'branch': get_cfg('remote.%s.%s' % (remote_name, 'bzr-branches')),
+        'remote_name': remote_name,
+        'message': False,
+        'filter': get_cfg('remote.%s.%s' % (remote_name, 'filter'), False),
+        'tmp_branch': get_cfg('remote.%s.%s' % (remote_name, 'tmp-branch'), 'tmp_branch'),
+        'remember': False
+    }
+    return Namespace(**args)
+
+def main(argv):
+    if len(argv) < 2:
+        usage(argv[0])
+
+    command = argv[1]
+    for name, desc, func in COMMANDS:
+        if name == command:
+            del argv[1]
+
+            if name == 'info':
+                return func(argv[1:])
+            else:
+                remote_name = get_remote_name(argv)
+
+                if has_cfg('remote.%s.remember' % remote_name):
+                    # assume arguments are saved in git config, or not...
+                    arguments = config_arguments(remote_name)
+                else:
+                    arguments = parse_arguments(name, desc)
+
+                if arguments.remember:
+                    store_cfg('remote.%s' % arguments.remote_name, {
+                        'bzr-repo': arguments.repository,
+                        'filter': arguments.filter,
+                        'tmp-branch': arguments.tmp_branch,
+                        'remember': 'true'
+                    })
+
+                try:
+                    arguments.repository = bzrlib.urlutils.normalize_url(arguments.repository)
+
+                    return func(
+                        arguments,
+                        git_branch(),
+                        bzr_branch(arguments.repository, arguments.branch)
+                    )
+                except Exception as e:
+                    log.error(e)
+                    if DEBUG:
+                        raise
+
+    print 'unknown command: %s' % command
+    usage(argv[0])
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
