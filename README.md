@@ -151,6 +151,7 @@ $ bats tests
 
 - git >= 1.8.x, should work with lower version too
 - bzr >= 2.6.x, required: **doesn't work on 2.5.1**
+- bzrlib >= 2.6.x, installable with `sudo apt-get install python-bzrlib`
 - [git-remote-bzr](https://github.com/felipec/git/blob/fc/master/git-remote-bzr.py)
 - for unit tests: [bats](https://github.com/sstephenson/bats/)
 
