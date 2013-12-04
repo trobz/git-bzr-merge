@@ -11,6 +11,8 @@ wget http://ftp.us.debian.org/debian/pool/main/b/bzr/bzr_2.6.0~bzr6526-1_all.deb
 wget http://ftp.us.debian.org/debian/pool/main/b/bzr/python-bzrlib_2.6.0-3_amd64.deb
 sudo dpkg -i python-bzrlib_2.6.0~bzr6526-1_amd64.deb
 sudo dpkg -i bzr_2.6.0~bzr6526-1_all.deb
+sudo apt-get -f -y install
+# install python lib
 sudo dpkg -i python-bzrlib_2.6.0-3_amd64.deb
 sudo apt-get -f -y install
 
