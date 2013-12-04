@@ -21,6 +21,8 @@ sudo wget https://raw.github.com/felipec/git/fc/master/git-remote-bzr.py -O /usr
 # install git-bzr-merge
 sudo cp git-bzr-merge /usr/local/bin/
 
+sudo chmod a+rwx  /usr/local/bin/git-*
+
 # install bats (unit tests)
 git clone https://github.com/sstephenson/bats.git
 cd bats
