@@ -1,0 +1,11 @@
+language: python
+
+install:
+  - ./.travis_install.sh
+
+script:
+  - ./.travis_test.sh
+
+notifications:
+  email:
+    - mmeyer@trobz.com
