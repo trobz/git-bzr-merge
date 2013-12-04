@@ -36,7 +36,7 @@ get only modules we want to sync and `git-remote-bzr` to pull/push from Bazaar r
 
 Copy to your ~/bin, or anywhere in your $PATH.
 
-Please check also the [dependencies section]([#dependencies).
+Please check also the [dependencies section](#dependencies).
 
 ## Usage
 
