@@ -13,9 +13,13 @@ Bi-directional git <-> bzr merging plugin for git.
 
 ## Limitations
 
+- only support 1 bzr branch by repository, but git can handle multiple different bzr repositories (but with distinct
+branch name)
 - you can't have a git branch with the same name than the bzr branch (`git-remote-bzr` failed to push to bzr if
-git/bzr branches are not the same)
-- from bzr to git, history is preserved but not from git to bzr (`git-remote-bzr` "supposed" limitation)
+git/bzr branches are not the same, see [bug report](https://github.com/felipec/git/issues/52))
+- unexpected bzr path conflict happen after a pull > modification > push sequence, I'm not sure the reason why but
+they can easily be solved by executing `bzr resolve --action=done` on the bzr branch, however check your branch status
+before...
 
 ## Story
 
@@ -135,25 +139,22 @@ Unit Tested with [bats](https://github.com/sstephenson/bats/).
 
 ```
 $ bats tests
- ✓ multiple pull without filter
- ✓ multiple pull without filter (remember)
- ✓ multiple pull with filter
- ✓ multiple pull with filter (remember)
- ✓ multiple pull with wildcard filter
- ✓ multiple push without filter
- ✓ multiple push without filter (remember)
- ✓ multiple push with filter
- ✓ multiple push with filter (remember)
- ✓ multiple push with wildcard filter
+ ✓ pull without filter
+ ✓ pull with filter
+ ✓ pull with wildcard filter
+ ✓ push without filter
+ ✓ push with filter
+ ✓ push with wildcard filter
+ ✓ pull/push
+ ✓ bzr repositories
 
-10 tests, 0 failures
+8 tests, 0 failures
 ```
 
 ## Dependencies
 
-- git >= 1.8.x, should work with lower version too
-- bzr >= 2.6.x, required: **doesn't work on 2.5.1**
-- bzrlib >= 2.6.x, installable with `sudo apt-get install python-bzrlib`
+- git >= 1.7.9.5, should work with lower version too
+- bzr >= 2.6.x, required - **doesn't work on 2.5.1**
 - [git-remote-bzr](https://github.com/felipec/git/blob/fc/master/git-remote-bzr.py)
 - for unit tests: [bats](https://github.com/sstephenson/bats/)
 
