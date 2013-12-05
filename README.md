@@ -133,7 +133,7 @@ git bzr-pull push bzr-repository bzr-branch [-m 'merge message'] [--filter sourc
 
 ## Unit Tests
 
-Unit Tested with [bats](https://github.com/sstephenson/bats/).
+Unit tested with [bats](https://github.com/sstephenson/bats/).
 
 **Execute test suite**
 
