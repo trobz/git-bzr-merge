@@ -86,8 +86,82 @@ setup() {
     cd $TEST_FOLDER
 }
 
+
+setup_bzr_bis() {
+    cd $TEST_FOLDER
+
+    # setup bzr test repos
+    bzr init-repo bzr-bis
+    cd bzr-bis
+    bzr init trunk
+
+    cd trunk
+    echo "bzr bis trunk file" > bzr_bis_trunk_file.txt
+    bzr add bzr_bis_trunk_file.txt
+    bzr commit -m "bzr bis trunk commit 1"
+
+    cd $TEST_FOLDER
+}
+
 teardown() {
     # remove all test data
     rm -rf $TEST_FOLDER
 }
 
+
+check_ls_length() {
+    length=`ls | wc | awk '{ print $1 }'`
+    if [[ $length -ne $1 ]]
+    then
+        echo -e "wrong file count\n\tget: $length\n\texpected: $1"
+        exit 1
+    fi
+}
+
+check_file_content() {
+    content=`cat $1`
+    if [[ $content != "$2" ]]
+    then
+        echo -e "wrong file content\n\tget: $content\n\texpected: $1"
+        exit 1
+    fi
+}
+
+check_git_has_commit() {
+    if [ "`git log --all --grep="$1"`" == "" ]
+    then
+        echo -e "cannot found git log message: $1"
+        exit 1
+    fi
+}
+
+check_bzr_log_length() {
+    length=`bzr log --include-merged --line | wc | awk '{ print $1 }'`
+    if [[ $length -ne $1 ]]
+    then
+        echo -e "wrong bzr log count\n\tget: $length\n\texpected: $1"
+        exit 1
+    fi
+}
+
+check_bzr_last_log_content() {
+    log=`bzr log -r-1 --line`
+    if [[ "$log" != *"$1"* ]]
+    then
+        echo -e "last bzr log doesn't match\n\tget: $log\n\texpected: $1"
+        exit 1
+    fi
+}
+
+check_failed() {
+
+    eval $1 | true
+    code=${PIPESTATUS[0]}
+
+    if [[ $code -eq 0 ]]
+    then
+        echo -e "command '$1' should have failed"
+        exit 1
+    fi
+
+}
