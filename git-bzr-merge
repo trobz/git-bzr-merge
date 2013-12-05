@@ -13,7 +13,7 @@
 #
 # see README.md for more details
 #
-
+from cStringIO import StringIO
 import os
 import re
 import sys
@@ -37,19 +37,175 @@ import bzrlib.urlutils
 import bzrlib.branch
 
 
+
+DEBUG = False
+
+# logging
+
+import ctypes
+
+class ColorizingStreamHandler(logging.StreamHandler):
+    # color names to indices
+    color_map = {
+        'black': 0,
+        'red': 1,
+        'green': 2,
+        'yellow': 3,
+        'blue': 4,
+        'magenta': 5,
+        'cyan': 6,
+        'white': 7,
+    }
+
+    #levels to (background, foreground, bold/intense)
+    level_map = {
+        logging.DEBUG: (None, 'blue', True),
+        logging.INFO: (None, 'blue', False),
+        logging.WARNING: (None, 'yellow', True),
+        logging.ERROR: (None, 'red', True),
+        logging.CRITICAL: ('red', 'white', True),
+    }
+
+    csi = '\x1b['
+    reset = '\x1b[0m'
+
+    @property
+    def is_tty(self):
+        isatty = getattr(self.stream, 'isatty', None)
+        return isatty and isatty()
+
+    def emit(self, record):
+        try:
+            message = self.format(record)
+            stream = self.stream
+            if not self.is_tty:
+                stream.write(message)
+            else:
+                self.output_colorized(message)
+            stream.write(getattr(self, 'terminator', '\n'))
+            self.flush()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except:
+            self.handleError(record)
+
+    if os.name != 'nt':
+        def output_colorized(self, message):
+            self.stream.write(message)
+    else:
+        import re
+        ansi_esc = re.compile(r'\x1b\[((?:\d+)(?:;(?:\d+))*)m')
+
+        nt_color_map = {
+            0: 0x00,    # black
+            1: 0x04,    # red
+            2: 0x02,    # green
+            3: 0x06,    # yellow
+            4: 0x01,    # blue
+            5: 0x05,    # magenta
+            6: 0x03,    # cyan
+            7: 0x07,    # white
+        }
+
+        def output_colorized(self, message):
+            parts = self.ansi_esc.split(message)
+            write = self.stream.write
+            h = None
+            fd = getattr(self.stream, 'fileno', None)
+            if fd is not None:
+                fd = fd()
+                if fd in (1, 2): # stdout or stderr
+                    h = ctypes.windll.kernel32.GetStdHandle(-10 - fd)
+            while parts:
+                text = parts.pop(0)
+                if text:
+                    write(text)
+                if parts:
+                    params = parts.pop(0)
+                    if h is not None:
+                        params = [int(p) for p in params.split(';')]
+                        color = 0
+                        for p in params:
+                            if 40 <= p <= 47:
+                                color |= self.nt_color_map[p - 40] << 4
+                            elif 30 <= p <= 37:
+                                color |= self.nt_color_map[p - 30]
+                            elif p == 1:
+                                color |= 0x08 # foreground intensity on
+                            elif p == 0: # reset to default color
+                                color = 0x07
+                            else:
+                                pass # error condition ignored
+                        ctypes.windll.kernel32.SetConsoleTextAttribute(h, color)
+
+    def colorize(self, message, record):
+        if record.levelno in self.level_map:
+            bg, fg, bold = self.level_map[record.levelno]
+            params = []
+            if bg in self.color_map:
+                params.append(str(self.color_map[bg] + 40))
+            if fg in self.color_map:
+                params.append(str(self.color_map[fg] + 30))
+            if bold:
+                params.append('1')
+            if params:
+                message = ''.join((self.csi, ';'.join(params),
+                                   'm', message, self.reset))
+        return message
+
+    def format(self, record):
+        message = logging.StreamHandler.format(self, record)
+        if self.is_tty:
+            # Don't colorize any traceback
+            parts = message.split('\n', 1)
+            parts[0] = self.colorize(parts[0], record)
+            message = '\n'.join(parts)
+        return message
+
+
+# define logger
+
 log = logging.getLogger('bzr-remote')
+ch = ColorizingStreamHandler()
+
+if DEBUG:
+    ch.setLevel(logging.DEBUG)
+    ch.setFormatter(logging.Formatter('[%(levelname)-5s] %(name)s: %(message)s'))
+else:
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter('%(name)s: %(message)s'))
+
+log.addHandler(ch)
+
 
 # useful methods (from git-bzr)
+
+class RedirectStdStreams(object):
+    def __init__(self, stdout=None, stderr=None):
+        self._stdout = stdout or sys.stdout
+        self._stderr = stderr or sys.stderr
+
+    def __enter__(self):
+        self.old_stdout, self.old_stderr = sys.stdout, sys.stderr
+        self.old_stdout.flush(); self.old_stderr.flush()
+        sys.stdout, sys.stderr = self._stdout, self._stderr
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._stdout.flush(); self._stderr.flush()
+        sys.stdout = self.old_stdout
+        sys.stderr = self.old_stderr
+
 
 def die(message, *args):
     log.error(message, *args)
     sys.exit(1)
 
 def run_command(cmd, error_ok=False, error_message=None, exit_code=False,
-                redirect_stdout=True, return_proc=False, stdout=None,
+                redirect_stdout=True, return_proc=False, stdout=subprocess.PIPE,
                 stdin=None):
-    # Useful for debugging:
-    log.debug('execute: "%s"',' '.join(cmd))
+
+    log.info('execute "%s"',' '.join(cmd))
+
     if redirect_stdout and stdout is None:
         stdout = subprocess.PIPE
 
@@ -182,6 +338,13 @@ def git_branch():
             git_branch = matches.group('branch')
     return git_branch, '.', '.'
 
+def each_remote():
+    remotes = git(['remote', '-v']).split('\n')
+    pattern = re.compile(r'(?iu)^(?P<name>[^ ]+)[\t]+bzr::(?P<remote>[^ ]+) \((?P<type>.+)\)')
+    for remote in remotes:
+        matches = pattern.match(remote)
+        if matches:
+            yield matches.groups()
 
 def git_remote(uri):
     """
@@ -192,7 +355,7 @@ def git_remote(uri):
     for remote in remotes:
         log.debug('check remote: %s', remote)
         matches = pattern.match(remote)
-        if matches and matches.group('remote') in uri:
+        if matches and matches.group('remote') == uri:
             return matches.groups()
     return None, None
 
@@ -217,24 +380,22 @@ def add_remote(uri, branch, remote_name):
     """
     name, remote = git_remote(uri)
 
-    if name:
-        if name != remote_name:
-            raise Exception('remote already configured with an other name (%s)' % name)
-
-        cfg_branch = get_cfg('remote.%s.bzr-branches' % name)
-
-        logging.info('compare %s with %s', cfg_branch, branch)
-
-        if cfg_branch != branch:
-            raise Exception('remote "%s" already configured for an other branch (%s)' % (name, cfg_branch))
-
-        log.info('remote bzr already configured as "%s"', name)
-    else:
+    if not name:
         git(['remote', 'add', remote_name, 'bzr::%s' % uri])
-        set_cfg('remote.%s.bzr-branches' % remote_name, branch)
-        git(['remote', 'update', remote_name])
+        name = remote_name
+        remote = uri
 
-    return remote_name
+    cfg_branch = get_cfg('remote.%s.bzr-branches' % name, None)
+    if not cfg_branch:
+        set_cfg('remote.%s.bzr-branches' % name, branch)
+    elif cfg_branch != branch and name == remote_name:
+        raise Exception('remote "%s" already configured for an other branch (%s)' % (name, cfg_branch))
+    else:
+        log.info('remote bzr already configured as "%s" for branch "%s"', name, branch)
+
+    git(['remote', 'update', name])
+
+    return remote
 
 def add_bzr_branch(uri, branch, remote_name):
     add_remote(uri, branch, remote_name)
@@ -257,7 +418,7 @@ def cmd_pull(arg, git_branch, bzr_branch):
     add_bzr_branch(arg.repository, arg.branch, arg.remote_name)
 
     if not arg.message:
-        message = "[merge] bzr branch '%s' into git branch '%s'" % (bzr_branch[0], git_branch[0])
+        message = "bzr branch '%s' into git branch '%s'" % (bzr_branch[0], git_branch[0])
         if arg.filter:
             message += " with filter: '%s'" % arg.filter
     else:
@@ -275,14 +436,12 @@ def cmd_pull(arg, git_branch, bzr_branch):
         git(['merge', arg.branch, '-m', message])
 
 
-
-
 def cmd_push(arg, git_branch, bzr_branch):
     log.info('push git branch "%s" into bzr branch "%s"', git_branch[0], bzr_branch[0])
     add_bzr_branch(arg.repository, arg.branch, arg.remote_name)
 
     if not arg.message:
-        message = "[merge] git branch '%s' into bzr branch '%s'" % (git_branch[0], bzr_branch[0])
+        message = "git branch '%s' into bzr branch '%s'" % (git_branch[0], bzr_branch[0])
         if arg.filter:
             message += " with filter: '%s'" % arg.filter
     else:
@@ -306,7 +465,26 @@ def cmd_push(arg, git_branch, bzr_branch):
 
 
 def cmd_info(arg):
-    print 'info'
+    for name, remote, type in each_remote():
+        if has_cfg('remote.%s.remember' % name) and type == "fetch":
+
+
+            branch = get_cfg('remote.%s.%s' % (name, 'bzr-branches'))
+            filter = get_cfg('remote.%s.%s' % (name, 'filter'), False)
+
+            info = {
+                'repository': remote,
+                'branch': branch
+            }
+
+            if filter:
+                info['filter'] = filter
+
+            print "%s:" % name
+            for key, val in info.items():
+                print "  - %-12s: %s" % (key, val)
+
+
 
 # Add CMD to git command
 
@@ -371,13 +549,20 @@ def main(argv):
             if name == 'info':
                 return func(argv[1:])
             else:
-                remote_name = get_remote_name(argv)
 
-                if has_cfg('remote.%s.remember' % remote_name):
-                    # assume arguments are saved in git config, or not...
-                    arguments = config_arguments(remote_name)
-                else:
-                    arguments = parse_arguments(name, desc)
+                try:
+                    # we don't want to display parsearg errors now (not effective in remember mode)
+                    stderr = StringIO()
+                    with RedirectStdStreams(stderr=stderr):
+                        arguments = parse_arguments(name, desc)
+                except:
+                    remote_name = get_remote_name(argv)
+                    if has_cfg('remote.%s.remember' % remote_name):
+                        # assume arguments are saved in git config, or not...
+                        arguments = config_arguments(remote_name)
+                    else:
+                        sys.stderr.write(stderr.getvalue())
+                        raise
 
                 if arguments.remember:
                     store_cfg('remote.%s' % arguments.remote_name, {
